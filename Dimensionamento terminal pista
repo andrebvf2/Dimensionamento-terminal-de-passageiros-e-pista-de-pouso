@@ -1,0 +1,102 @@
+#dimensionamento
+# DIMENSIONAMENTO PRELIMINAR 
+# LEITOR DE INPUT + PROJECAO DE POPULACAO
+
+
+
+def ler_arquivo_input(caminho_arquivo):
+
+    dados = {}
+
+    with open(caminho_arquivo, "r", encoding="utf-8") as arquivo:
+        linhas = arquivo.readlines()
+
+    i = 0
+    while i < len(linhas):
+        linha = linhas[i].strip()
+
+        # BLOCO POPULACAO
+        if linha == "POPULACAO":
+            dados["POPULACAO"] = ler_populacao(linhas, i + 1)
+
+        i += 1
+
+    return dados
+
+
+def ler_populacao(linhas, indice_inicial):
+
+    dados_pop = {}
+    i = indice_inicial
+
+    while i < len(linhas):
+        linha = linhas[i].strip()
+
+        # Fim do bloco POPULACAO
+        if linha == "":
+            break
+
+        # Identificar a opção escolhida
+        if linha.startswith("OPCAO"):
+            dados_pop["opcao"] = int(linha.split()[1])
+
+        # OPCAO 1 - vetor definido manualmente
+        elif linha.startswith("ANOS"):
+            vetor = linha.split("{")[1].split("}")[0]
+            anos = [int(x.strip()) for x in vetor.split(",")]
+            dados_pop["anos"] = anos
+            break
+
+        # OPCAO 2 - semiautomatico
+        elif linha.startswith("INTERVALO"):
+            dados_pop["intervalo"] = int(linha.split()[1])
+
+        elif linha.startswith("NUM_INTERVALOS"):
+            dados_pop["num_intervalos"] = int(linha.split()[1])
+            break
+
+        i += 1
+
+    return gerar_vetor_anos(dados_pop)
+
+
+def gerar_vetor_anos(dados_pop):
+
+    # OPCAO 1 - usuário define diretamente
+    if dados_pop["opcao"] == 1:
+        return dados_pop["anos"]
+
+    # OPCAO 2 - geração semiautomática
+    elif dados_pop["opcao"] == 2:
+        intervalo = dados_pop["intervalo"]
+        n = dados_pop["num_intervalos"]
+
+        anos = []
+        for i in range(1, n + 1):
+            anos.append(intervalo * i)
+
+        return anos
+
+    else:
+        raise ValueError("Opção de população inválida.")
+
+
+# PROGRAMA PRINCIPAL
+if __name__ == "__main__":
+
+    # Arquivo de entrada
+    caminho_input = "input.txt"
+
+    # Leitura do arquivo
+    dados = ler_arquivo_input(caminho_input)
+    # Vetor de anos de projeção
+    anos_projecao = dados["POPULACAO"]
+
+    print("\n========================================")
+    print("ANOS DE PROJECAO DEFINIDOS PARA O ESTUDO")
+    print("========================================")
+    print(anos_projecao)
+
+    # Exemplo de uso futuro nos cálculos
+    for ano in anos_projecao:
+        print(f"-> Executar cálculos para {ano} anos de projeção")
