@@ -15,15 +15,28 @@ def ler_arquivo_input(caminho_arquivo):
     while i < len(linhas):
         linha = linhas[i].strip()
 
-        # BLOCO POPULACAO
+        # POPULACAO 
         if linha == "POPULACAO":
             dados["POPULACAO"] = ler_populacao(linhas, i + 1)
+
+        # ALTITUDE 
+        elif linha == "ALTITUDE":
+            dados["ALTITUDE"] = ler_valor_simples(linhas, i + 1)
+
+        # TEMPERATURA 
+        elif linha == "TEMPERATURA":
+            dados["TEMPERATURA"] = ler_valor_simples(linhas, i + 1)
+
+        # DECLIVIDADE
+        elif linha == "DECLIVIDADE":
+            dados["DECLIVIDADE"] = ler_valor_simples(linhas, i + 1)
 
         i += 1
 
     return dados
 
 
+# POPULACAO
 def ler_populacao(linhas, indice_inicial):
 
     dados_pop = {}
@@ -32,22 +45,18 @@ def ler_populacao(linhas, indice_inicial):
     while i < len(linhas):
         linha = linhas[i].strip()
 
-        # Fim do bloco POPULACAO
         if linha == "":
             break
 
-        # Identificar a opção escolhida
         if linha.startswith("OPCAO"):
             dados_pop["opcao"] = int(linha.split()[1])
 
-        # OPCAO 1 - vetor definido manualmente
         elif linha.startswith("ANOS"):
             vetor = linha.split("{")[1].split("}")[0]
             anos = [int(x.strip()) for x in vetor.split(",")]
             dados_pop["anos"] = anos
             break
 
-        # OPCAO 2 - semiautomatico
         elif linha.startswith("INTERVALO"):
             dados_pop["intervalo"] = int(linha.split()[1])
 
@@ -60,43 +69,40 @@ def ler_populacao(linhas, indice_inicial):
     return gerar_vetor_anos(dados_pop)
 
 
+# VALOR SIMPLES
+def ler_valor_simples(linhas, indice_inicial):
+
+    linha = linhas[indice_inicial].strip()
+    valor = float(linha.split()[1])
+    return valor
+
+
+# GERAR ANOS
 def gerar_vetor_anos(dados_pop):
 
-    # OPCAO 1 - usuário define diretamente
     if dados_pop["opcao"] == 1:
         return dados_pop["anos"]
 
-    # OPCAO 2 - geração semiautomática
     elif dados_pop["opcao"] == 2:
         intervalo = dados_pop["intervalo"]
         n = dados_pop["num_intervalos"]
 
-        anos = []
-        for i in range(1, n + 1):
-            anos.append(intervalo * i)
-
-        return anos
-
-    else:
-        raise ValueError("Opção de população inválida.")
+        return [intervalo * i for i in range(1, n + 1)]
 
 
-# PROGRAMA PRINCIPAL
+# MAIN
 if __name__ == "__main__":
 
-    # Arquivo de entrada
-    caminho_input = "input.txt"
+    dados = ler_arquivo_input("input.txt")
 
-    # Leitura do arquivo
-    dados = ler_arquivo_input(caminho_input)
-    # Vetor de anos de projeção
-    anos_projecao = dados["POPULACAO"]
+    print("\n==== DADOS LIDOS DO INPUT ====")
+    print("Anos:", dados["POPULACAO"])
+    print("Altitude:", dados["ALTITUDE"])
+    print("Temperatura:", dados["TEMPERATURA"])
+    print("Declividade:", dados["DECLIVIDADE"])
 
-    print("\n========================================")
-    print("ANOS DE PROJECAO DEFINIDOS PARA O ESTUDO")
-    print("========================================")
-    print(anos_projecao)
+    print("\n==== LOOP DE CALCULO ====")
 
-    # Exemplo de uso futuro nos cálculos
-    for ano in anos_projecao:
-        print(f"-> Executar cálculos para {ano} anos de projeção")
+    for ano in dados["POPULACAO"]:
+        print(f"Calculando para {ano} anos...")
+
