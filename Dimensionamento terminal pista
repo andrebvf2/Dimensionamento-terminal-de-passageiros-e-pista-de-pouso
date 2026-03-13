@@ -2,8 +2,6 @@
 # DIMENSIONAMENTO PRELIMINAR 
 # LEITOR DE INPUT + PROJECAO DE POPULACAO
 
-
-
 def ler_arquivo_input(caminho_arquivo):
 
     dados = {}
@@ -13,23 +11,20 @@ def ler_arquivo_input(caminho_arquivo):
 
     i = 0
     while i < len(linhas):
+
         linha = linhas[i].strip()
 
-        # POPULACAO 
         if linha == "POPULACAO":
             dados["POPULACAO"] = ler_populacao(linhas, i + 1)
 
-        # ALTITUDE 
         elif linha == "ALTITUDE":
-            dados["ALTITUDE"] = ler_valor_simples(linhas, i + 1)
+            dados["ALTITUDE"] = float(linhas[i+1].strip())
 
-        # TEMPERATURA 
         elif linha == "TEMPERATURA":
-            dados["TEMPERATURA"] = ler_valor_simples(linhas, i + 1)
+            dados["TEMPERATURA"] = float(linhas[i+1].strip())
 
-        # DECLIVIDADE
         elif linha == "DECLIVIDADE":
-            dados["DECLIVIDADE"] = ler_valor_simples(linhas, i + 1)
+            dados["DECLIVIDADE"] = float(linhas[i+1].strip())
 
         i += 1
 
@@ -37,57 +32,25 @@ def ler_arquivo_input(caminho_arquivo):
 
 
 # POPULACAO
-def ler_populacao(linhas, indice_inicial):
+def ler_populacao(linhas, indice):
 
-    dados_pop = {}
-    i = indice_inicial
+    valores = linhas[indice].split()
 
-    while i < len(linhas):
-        linha = linhas[i].strip()
+    opcao = int(valores[0])
+    intervalo = int(valores[1])
+    num_intervalos = int(valores[2])
 
-        if linha == "":
-            break
-
-        if linha.startswith("OPCAO"):
-            dados_pop["opcao"] = int(linha.split()[1])
-
-        elif linha.startswith("ANOS"):
-            vetor = linha.split("{")[1].split("}")[0]
-            anos = [int(x.strip()) for x in vetor.split(",")]
-            dados_pop["anos"] = anos
-            break
-
-        elif linha.startswith("INTERVALO"):
-            dados_pop["intervalo"] = int(linha.split()[1])
-
-        elif linha.startswith("NUM_INTERVALOS"):
-            dados_pop["num_intervalos"] = int(linha.split()[1])
-            break
-
-        i += 1
-
-    return gerar_vetor_anos(dados_pop)
-
-
-# VALOR SIMPLES
-def ler_valor_simples(linhas, indice_inicial):
-
-    linha = linhas[indice_inicial].strip()
-    valor = float(linha.split()[1])
-    return valor
+    return gerar_vetor_anos(opcao, intervalo, num_intervalos)
 
 
 # GERAR ANOS
-def gerar_vetor_anos(dados_pop):
+def gerar_vetor_anos(opcao, intervalo, num_intervalos):
 
-    if dados_pop["opcao"] == 1:
-        return dados_pop["anos"]
+    if opcao == 1:
+        return []
 
-    elif dados_pop["opcao"] == 2:
-        intervalo = dados_pop["intervalo"]
-        n = dados_pop["num_intervalos"]
-
-        return [intervalo * i for i in range(1, n + 1)]
+    elif opcao == 2:
+        return [intervalo * i for i in range(1, num_intervalos + 1)]
 
 
 # MAIN
