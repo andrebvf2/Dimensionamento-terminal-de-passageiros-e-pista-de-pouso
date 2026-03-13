@@ -17,7 +17,12 @@ def ler_arquivo_input(caminho_arquivo):
             dados["POPULACAO"] = ler_populacao(linhas[i+1])
 
         elif linha == "ALTITUDE":
-            dados["ALTITUDE"] = float(linhas[i+1])
+            altitude = float(linhas[i+1])
+
+            if altitude < 0:
+                raise ValueError("ERRO: A altitude não pode ser negativa.")
+
+            dados["ALTITUDE"] = altitude
 
         elif linha == "TEMPERATURA":
             dados["TEMPERATURA"] = float(linhas[i+1])
@@ -35,9 +40,32 @@ def ler_populacao(linha):
 
     valores = linha.split()
 
-    opcao = int(valores[0])
-    intervalo = int(valores[1])
-    num_intervalos = int(valores[2])
+    if len(valores) != 3:
+        raise ValueError("ERRO: A linha de população deve conter três valores: OPCAO INTERVALO NUM_INTERVALOS")
+
+    # verificar se são números inteiros
+    try:
+        opcao = int(valores[0])
+        intervalo = int(valores[1])
+        num_intervalos = int(valores[2])
+    except ValueError:
+        raise ValueError("ERRO: OPCAO, INTERVALO e NUM_INTERVALOS devem ser números inteiros.")
+
+    # validar opcao
+    if opcao not in [1, 2]:
+        raise ValueError("ERRO: OPCAO inválida. Use 1 ou 2.")
+
+    # intervalo não pode ser quebrado
+    if not isinstance(intervalo, int):
+        raise ValueError("ERRO: O intervalo deve ser um número inteiro.")
+
+    # número de intervalos não pode ser quebrado
+    if not isinstance(num_intervalos, int):
+        raise ValueError("ERRO: O número de intervalos deve ser um número inteiro.")
+
+    # tempo total não pode passar de 50 anos
+    if intervalo * num_intervalos > 50:
+        raise ValueError("ERRO: O horizonte de projeto não pode ultrapassar 50 anos.")
 
     return gerar_vetor_anos(opcao, intervalo, num_intervalos)
 
@@ -48,21 +76,28 @@ def gerar_vetor_anos(opcao, intervalo, num_intervalos):
     if opcao == 2:
         return [intervalo * i for i in range(1, num_intervalos + 1)]
 
-    return []
+    elif opcao == 1:
+        return []
 
 
 # MAIN
 if __name__ == "__main__":
 
-    dados = ler_arquivo_input("input.txt")
+    try:
 
-    print("\n==== DADOS LIDOS DO INPUT ====")
-    print("Anos:", dados["POPULACAO"])
-    print("Altitude:", dados["ALTITUDE"])
-    print("Temperatura:", dados["TEMPERATURA"])
-    print("Declividade:", dados["DECLIVIDADE"])
+        dados = ler_arquivo_input("input.txt")
 
-    print("\n==== LOOP DE CALCULO ====")
+        print("\n==== DADOS LIDOS DO INPUT ====")
+        print("Anos:", dados["POPULACAO"])
+        print("Altitude:", dados["ALTITUDE"])
+        print("Temperatura:", dados["TEMPERATURA"])
+        print("Declividade:", dados["DECLIVIDADE"])
 
-    for ano in dados["POPULACAO"]:
-        print(f"Calculando para {ano} anos...")
+        print("\n==== LOOP DE CALCULO ====")
+
+        for ano in dados["POPULACAO"]:
+            print(f"Calculando para {ano} anos...")
+
+    except Exception as erro:
+        print("\n*** ERRO NO INPUT ***")
+        print(erro)
