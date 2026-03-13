@@ -1,6 +1,6 @@
 POPULACAO
-2          5                 4
- 
+2 5 4
+
 ALTITUDE
 300
 
@@ -9,6 +9,7 @@ TEMPERATURA
 
 DECLIVIDADE
 0.5
+
 
 
 
