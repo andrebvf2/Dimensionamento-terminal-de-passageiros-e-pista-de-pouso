@@ -1,5 +1,4 @@
 POPULACAO
-OPCAO   INTERVALO      NUM_INTERVALOS
 2          5                 4
  
 ALTITUDE
@@ -10,6 +9,7 @@ TEMPERATURA
 
 DECLIVIDADE
 0.5
+
 
 
 
