@@ -1,12 +1,24 @@
 # DIMENSIONAMENTO PRELIMINAR
 # LEITOR DE INPUT + PROJECAO DE POPULACAO
 
+# main.py
+
+from erros import erro, validar_numero, validar_inteiro, ErroInput
+
+
+# =========================
+# LEITURA DO ARQUIVO
+# =========================
+
 def ler_arquivo_input(caminho_arquivo):
 
     dados = {}
 
-    with open(caminho_arquivo, "r", encoding="utf-8") as arquivo:
-        linhas = [linha.strip() for linha in arquivo if linha.strip() != ""]
+    try:
+        with open(caminho_arquivo, "r", encoding="utf-8") as arquivo:
+            linhas = [linha.strip() for linha in arquivo if linha.strip() != ""]
+    except FileNotFoundError:
+        erro("ERRO: Arquivo input.txt não encontrado.")
 
     i = 0
     while i < len(linhas):
@@ -17,60 +29,47 @@ def ler_arquivo_input(caminho_arquivo):
             dados["POPULACAO"] = ler_populacao(linhas[i+1])
 
         elif linha == "ALTITUDE":
-            altitude = float(linhas[i+1])
-
-            if altitude < 0:
-                raise ValueError("ERRO: A altitude não pode ser negativa.")
-
-            dados["ALTITUDE"] = altitude
+            dados["ALTITUDE"] = validar_numero(linhas[i+1], "ALTITUDE")
 
         elif linha == "TEMPERATURA":
-            dados["TEMPERATURA"] = float(linhas[i+1])
+            dados["TEMPERATURA"] = validar_numero(linhas[i+1], "TEMPERATURA")
 
         elif linha == "DECLIVIDADE":
-            dados["DECLIVIDADE"] = float(linhas[i+1])
+            dados["DECLIVIDADE"] = validar_numero(linhas[i+1], "DECLIVIDADE")
 
         i += 1
 
     return dados
 
 
+# =========================
 # POPULACAO
+# =========================
+
 def ler_populacao(linha):
 
     valores = linha.split()
 
     if len(valores) != 3:
-        raise ValueError("ERRO: A linha de população deve conter três valores: OPCAO INTERVALO NUM_INTERVALOS")
+        erro("ERRO: A linha de população deve conter 3 valores: OPCAO INTERVALO NUM_INTERVALOS")
 
-    # verificar se são números inteiros
-    try:
-        opcao = int(valores[0])
-        intervalo = int(valores[1])
-        num_intervalos = int(valores[2])
-    except ValueError:
-        raise ValueError("ERRO: OPCAO, INTERVALO e NUM_INTERVALOS devem ser números inteiros.")
+    opcao = validar_inteiro(valores[0], "OPCAO")
+    intervalo = validar_inteiro(valores[1], "INTERVALO")
+    num_intervalos = validar_inteiro(valores[2], "NUM_INTERVALOS")
 
-    # validar opcao
     if opcao not in [1, 2]:
-        raise ValueError("ERRO: OPCAO inválida. Use 1 ou 2.")
+        erro("ERRO: OPCAO inválida. Use 1 ou 2.")
 
-    # intervalo não pode ser quebrado
-    if not isinstance(intervalo, int):
-        raise ValueError("ERRO: O intervalo deve ser um número inteiro.")
-
-    # número de intervalos não pode ser quebrado
-    if not isinstance(num_intervalos, int):
-        raise ValueError("ERRO: O número de intervalos deve ser um número inteiro.")
-
-    # tempo total não pode passar de 50 anos
     if intervalo * num_intervalos > 50:
-        raise ValueError("ERRO: O horizonte de projeto não pode ultrapassar 50 anos.")
+        erro("ERRO: O horizonte de projeto não pode ultrapassar 50 anos.")
 
     return gerar_vetor_anos(opcao, intervalo, num_intervalos)
 
 
+# =========================
 # GERAR ANOS
+# =========================
+
 def gerar_vetor_anos(opcao, intervalo, num_intervalos):
 
     if opcao == 2:
@@ -80,7 +79,10 @@ def gerar_vetor_anos(opcao, intervalo, num_intervalos):
         return []
 
 
+# =========================
 # MAIN
+# =========================
+
 if __name__ == "__main__":
 
     try:
@@ -98,6 +100,6 @@ if __name__ == "__main__":
         for ano in dados["POPULACAO"]:
             print(f"Calculando para {ano} anos...")
 
-    except Exception as erro:
+    except ErroInput as e:
         print("\n*** ERRO NO INPUT ***")
-        print(erro)
+        print(e)
