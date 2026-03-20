@@ -4,38 +4,46 @@ class ErroInput(Exception):
     pass
 
 
-def erro(msg):
-    raise ErroInput(msg)
+def erro(campo, msg):
+    raise ErroInput(f"ERRO em {campo}: {msg}")
 
 
-def validar_numero(valor, nome_variavel):
+def validar_numero(valor, campo):
+
+    if str(valor).strip() == "":
+        erro(campo, "valor não informado.")
+
     try:
         return float(valor)
-    except:
-        erro(f"ERRO: Valor inválido para {nome_variavel}. Por favor, inserir valor numérico.")
+    except ValueError:
+        erro(campo, f"valor inválido ('{valor}'). Digite um número.")
 
 
-def validar_inteiro(valor, nome_variavel):
-    try:
-        if float(valor) % 1 != 0:
-            erro(f"ERRO: {nome_variavel} não pode ser número quebrado.")
-        return int(valor)
-    except:
-        erro(f"ERRO: Valor inválido para {nome_variavel}. Deve ser inteiro.")
+def validar_inteiro(valor, campo):
+
+    num = validar_numero(valor, campo)
+
+    if not float(num).is_integer():
+        erro(campo, f"valor decimal ({valor}). Use apenas números inteiros.")
+
+    return int(num)
 
 
-def validar_nao_nulo(valor, nome_variavel):
-    if valor == "" or valor is None:
-        erro(f"ERRO: A variável {nome_variavel} não pode ser vazia (null).")
+def validar_positivo(valor, campo):
+
+    num = validar_numero(valor, campo)
+
+    if num < 0:
+        erro(campo, f"valor negativo ({valor}). Não permitido.")
+
+    return num
 
 
-def validar_populacao(valor):
-    valor = validar_numero(valor, "POPULACAO")
+def validar_inteiro_positivo(valor, campo):
 
-    if valor < 0:
-        erro("ERRO: População não pode ser negativa.")
+    num = validar_inteiro(valor, campo)
 
-    if valor % 1 != 0:
-        erro("ERRO: População não pode ser número quebrado.")
+    if num < 0:
+        erro(campo, f"valor negativo ({valor}). Não permitido.")
 
-    return int(valor)
+    return num
