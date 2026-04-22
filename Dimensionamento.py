@@ -6,18 +6,14 @@ from erros import erro, validar_numero, validar_inteiro, validar_positivo, ErroI
 import numpy as np
 import math
 
-# =========================
 # BLOCOS DO INPUT
-# =========================
 
 BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "DECLIVIDADE", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO"]
 
 def eh_bloco(linha):
     return linha in BLOCOS
 
-# =========================
 # POPULAÇÃO
-# =========================
 
 def ler_populacao(linha):
     v = linha.split()
@@ -33,9 +29,7 @@ def ler_populacao(linha):
 
     return [intervalo * i for i in range(1, n+1)]
 
-# =========================
 # LEITURA INPUT
-# =========================
 
 def ler_arquivo_input(caminho):
 
