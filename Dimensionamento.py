@@ -1,18 +1,23 @@
 # DIMENSIONAMENTO PRELIMINAR
 # LEITOR DE INPUT + PROJECAO DE POPULACAO + AREA DO TERMINAL + TAMANHO PISTA DE POUSO
 
+
 from erros import erro, validar_numero, validar_inteiro, validar_positivo, ErroInput
 import numpy as np
 import math
 
+# =========================
 # BLOCOS DO INPUT
+# =========================
 
-BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "DECLIVIDADE", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO", "TIPO_AEROPORTO"]
+BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "DECLIVIDADE", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO"]
 
 def eh_bloco(linha):
     return linha in BLOCOS
 
-# POPULACAO
+# =========================
+# POPULAÇÃO
+# =========================
 
 def ler_populacao(linha):
     v = linha.split()
@@ -20,7 +25,6 @@ def ler_populacao(linha):
     if len(v) < 3:
         erro("POPULACAO", "dados incompletos.")
 
-    opcao = validar_inteiro(v[0], "OPCAO")
     intervalo = validar_inteiro(v[1], "INTERVALO")
     n = validar_inteiro(v[2], "NUM_INTERVALOS")
 
@@ -29,7 +33,9 @@ def ler_populacao(linha):
 
     return [intervalo * i for i in range(1, n+1)]
 
-# LEITURA DO INPUT
+# =========================
+# LEITURA INPUT
+# =========================
 
 def ler_arquivo_input(caminho):
 
@@ -70,16 +76,9 @@ def ler_arquivo_input(caminho):
                 erro("NIVEL_SERVICO", "use A, B ou C.")
             dados["NIVEL_SERVICO"] = nivel
 
-        elif linha == "TIPO_AEROPORTO":
-            tipo = linhas[i+1].upper()
-            if tipo not in ["INT", "DOM", "REG"]:
-                erro("TIPO_AEROPORTO", "use INT, DOM ou REG.")
-            dados["TIPO_AEROPORTO"] = tipo
-
         i += 1
 
     return dados
-
 
 # PHP (ANAC)
 
@@ -92,29 +91,20 @@ def fator_hora_pico(d):
 
 def calcular_php(d):
     fhp = fator_hora_pico(d)
-    php = d * fhp/100
+    php = d * fhp / 100
     return php, fhp
 
+# TERMINAL (REGIONAL)
 
-# TERMINAL COMPLETO
+def dimensionar_terminal(php, nivel):
 
-def dimensionar_terminal(php, nivel, tipo):
+    # SAGUÃO EMBARQUE (REGIONAL)
+    indices_embarque = {"A": 1.80, "B": 1.50, "C": 1.20}
+    area_saguao = php * indices_embarque[nivel]
 
-    # SAGUÃO EMBARQUE 
-    indices_embarque = {
-        "A": {"INT": 2.50, "DOM": 2.20, "REG": 1.80},
-        "B": {"INT": 2.00, "DOM": 1.80, "REG": 1.50},
-        "C": {"INT": 1.60, "DOM": 1.40, "REG": 1.20}
-    }
-    area_saguao = php * indices_embarque[nivel][tipo]
-
-    # PRÉ-EMBARQUE 
-    indices_pre = {
-        "A": {"INT": 1.60, "DOM": 1.40, "REG": 1.20},
-        "B": {"INT": 1.40, "DOM": 1.20, "REG": 1.00},
-        "C": {"INT": 1.10, "DOM": 1.00, "REG": 0.80}
-    }
-    area_pre = php * indices_pre[nivel][tipo]
+    # PRÉ-EMBARQUE (REGIONAL)
+    indices_pre = {"A": 1.20, "B": 1.00, "C": 0.80}
+    area_pre = php * indices_pre[nivel]
 
     # CHECK-IN
     pax_checkin = 0.20 * php
@@ -137,35 +127,17 @@ def dimensionar_terminal(php, nivel, tipo):
     modulos = math.ceil(php / 180)
     area_seguranca = modulos * 13.5
 
-    # TRIAGEM 
-
-    indice_triagem = {
-        "INT": 40,
-        "DOM": 40,
-        "REG": 20
-    }
-
-    # número de voos (70 pax por voo)
+    # TRIAGEM (REGIONAL)
     n_voos = math.ceil(php / 70)
+    area_triagem = n_voos * 20  # regional
 
-    # área total da triagem
-    area_triagem = n_voos * indice_triagem[tipo]
+    # RESTITUIÇÃO (REGIONAL)
+    indices_bagagem = {"A": 1.30, "B": 1.10, "C": 0.80}
+    area_restituicao = php * indices_bagagem[nivel]
 
-    # RESTITUIÇÃO 
-    indices_bagagem = {
-        "A": {"INT": 2.00, "DOM": 1.60, "REG": 1.30},
-        "B": {"INT": 1.60, "DOM": 1.40, "REG": 1.10},
-        "C": {"INT": 1.30, "DOM": 1.10, "REG": 0.80}
-    }
-    area_restituicao = php * indices_bagagem[nivel][tipo]
-
-    # DESEMBARQUE 
-    indices_desembarque = {
-        "A": {"INT": 2.00, "DOM": 1.80, "REG": 1.60},
-        "B": {"INT": 1.80, "DOM": 1.50, "REG": 1.20},
-        "C": {"INT": 1.50, "DOM": 1.20, "REG": 1.00}
-    }
-    area_desembarque = php * indices_desembarque[nivel][tipo]
+    # DESEMBARQUE (REGIONAL)
+    indices_desembarque = {"A": 1.50, "B": 1.20, "C": 1.00}
+    area_desembarque = php * indices_desembarque[nivel]
 
     areas = {
         "Saguão embarque": area_saguao,
@@ -182,8 +154,7 @@ def dimensionar_terminal(php, nivel, tipo):
 
     return areas, total, balcoes, n_bilhetes
 
-
-    # PISTA
+# PISTA
 
 def obter_L0(e):
 
@@ -194,7 +165,6 @@ def obter_L0(e):
     elif e < 65: return 2400
     else: return 3000
 
-
 def calcular_pista(L0, alt, temp, decl):
 
     CA = (alt/300)*0.07 + 1
@@ -203,7 +173,6 @@ def calcular_pista(L0, alt, temp, decl):
     CD = 1 + decl*0.10
 
     return L0 * CA * CT * CD
-
 
 def largura_pista(L, e):
 
@@ -235,17 +204,15 @@ if __name__ == "__main__":
 
         demanda = dados["DEMANDA_ANUAL"]
         nivel = dados["NIVEL_SERVICO"]
-        tipo = dados["TIPO_AEROPORTO"]
 
         php, fhp = calcular_php(demanda)
 
-        areas, total, balcoes, n_bilhetes = dimensionar_terminal(php, nivel, tipo)
+        areas, total, balcoes, n_bilhetes = dimensionar_terminal(php, nivel)
 
         L0 = obter_L0(dados["ENVERGADURA"])
         Lf = calcular_pista(L0, dados["ALTITUDE"], dados["TEMPERATURA"], dados["DECLIVIDADE"])
         largura = largura_pista(Lf, dados["ENVERGADURA"])
 
-        # SAÍDA
         print("\n==== POPULAÇÃO ====")
         print(dados["POPULACAO"])
 
