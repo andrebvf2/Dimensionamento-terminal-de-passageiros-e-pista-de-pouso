@@ -19,30 +19,34 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 def normalizar(txt):
     """Remove acentos, espaços extras, parênteses e converte para minúsculas."""
     if pd.isna(txt): return ""
+    # Remove o que estiver dentro de parênteses (comum na base da ANAC: "CIDADE (UF)")
     txt = re.sub(r'\(.*?\)', '', str(txt))
+    # Remove códigos numéricos do IBGE no início da string
     txt = re.sub(r'^\d+\s*', '', txt)
     return unicodedata.normalize('NFKD', txt).encode('ascii', 'ignore').decode().lower().strip()
 
 # BLOCOS DO INPUT
 
-BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "COTAS_PISTA", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO", "COMPRIMENTO_BASICO"]
+BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "DECLIVIDADE", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO", "COMPRIMENTO_BASICO"]
 
 def eh_bloco(linha):
     return linha in BLOCOS
 
-
 # CARREGAMENTO E CONSOLIDAÇÃO DE DADOS
 
 def carregar_bases_locais():
+    """Lê População, PIB (PIB2023.csv) e ANAC, unindo-os de forma resiliente."""
     files = ["ibge_limpo.csv", "PIB2023.csv", "anac.csv"]
     for f in files:
         if not os.path.exists(f):
             raise ErroInput("ARQUIVO", f"Arquivo '{f}' não encontrado na pasta atual.")
 
     try:
+        # 1. Carrega População
         df_pop = pd.read_csv("ibge_limpo.csv", encoding='utf-8')
         df_pop["cidade_norm"] = df_pop["cidade"].apply(normalizar)
 
+        # 2. Carrega PIB (PIB2023.csv)
         df_pib_raw = pd.read_csv("PIB2023.csv", sep=None, engine='python', encoding='utf-8-sig', skiprows=3)
         df_pib_raw.columns = df_pib_raw.columns.str.strip().str.lower()
         
@@ -54,9 +58,11 @@ def carregar_bases_locais():
             'pib_valor': pd.to_numeric(df_pib_raw[col_val_pib], errors='coerce')
         }).dropna()
 
+        # 3. Une População e PIB (Merge)
         df_ibge = pd.merge(df_pop, df_pib, on="cidade_norm", how="left")
         df_ibge["pib"] = df_ibge["pib_valor"].fillna(0)
 
+        # 4. Carrega ANAC
         df_anac = pd.read_csv("anac.csv", sep=None, engine='python', on_bad_lines='skip', encoding='utf-8')
         df_anac.columns = df_anac.columns.str.strip().str.lower()
         
@@ -88,7 +94,7 @@ def get_dados_ibge(cidade_nome, df_ibge):
         
     return populacao, pib
 
-# PREVISÃO DE DEMANDA 
+# PREVISÃO DE DEMANDA (RETA ANCORADA)
 
 def selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac):
     cidades_com_aeroporto = df_anac["mun_norm"].unique()
@@ -105,9 +111,12 @@ def selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac):
         abs(np.log1p(df_filtrado["pib"]) - pib_alvo_log) / pib_alvo_log
     )
     
+    # FILTRO DE REALIDADE: 
+    # 1. Ignorar anomalias turísticas extremas
     anomalias_conhecidas = ["fernando de noronha", "porto seguro", "gramado", "rio de janeiro", "sao paulo", "belem"]
     df_filtrado = df_filtrado[~df_filtrado["cidade_norm"].isin(anomalias_conhecidas)]
     
+    # 2. Impedir que cidades com diferença absurda de tamanho entrem na lista
     df_filtrado = df_filtrado[
         (df_filtrado["populacao"] <= pop_alvo * 10) & 
         (df_filtrado["populacao"] >= pop_alvo * 0.1)
@@ -241,15 +250,8 @@ def ler_arquivo_input(caminho):
             dados["ALTITUDE"] = validar_numero(linhas[i+1], "ALTITUDE")
         elif linha == "TEMPERATURA":
             dados["TEMPERATURA"] = validar_numero(linhas[i+1], "TEMPERATURA")
-            
-        # LEITURA DE COTAS:
-        elif linha == "COTAS_PISTA":
-            v = linhas[i+1].split()
-            if len(v) < 2:
-                erro("COTAS_PISTA", "Você precisa fornecer dois valores numéricos. Ex: 565 550")
-            dados["COTA_ALTA"] = validar_numero(v[0], "COTA_ALTA")
-            dados["COTA_BAIXA"] = validar_numero(v[1], "COTA_BAIXA")
-            
+        elif linha == "DECLIVIDADE":
+            dados["DECLIVIDADE"] = validar_numero(linhas[i+1], "DECLIVIDADE")
         elif linha == "ENVERGADURA":
             dados["ENVERGADURA"] = validar_positivo(linhas[i+1], "ENVERGADURA")
         elif linha == "COMPRIMENTO_BASICO":
@@ -312,76 +314,60 @@ def dimensionar_terminal(php, nivel):
     
     return areas, sum(areas.values()), balcoes, n_bilhetes
 
-# Função para calcular declividade e receber cota
 def calcular_pista(L0, alt, temp, cota_alta, cota_baixa):
-    """
-    Calcula o comprimento corrigido da pista de pouso a partir das cotas físicas.
-    """
-    # Diferença das cotas / comprimento de referência
-    diferenca_cotas = abs(cota_alta - cota_baixa)
-    declividade = (diferenca_cotas / L0) * 100
-    
+    # Calculo da declividade em porcentagem 
+    diferenca_cotas = cota_alta - cota_baixa
+    declividade = (diferenca_cotas / L0) * 100 
+
     CA = (alt / 300) * 0.07 + 1.00
     TP = 15 - 0.0066 * alt
     CT = 1.00 + (temp - TP) * 0.01
     
-    # Aplica o Fator de Correção CD
+    #Cálculo do CD usando a declividade descoberta
     CD = 1.00 + (declividade * 0.10)
     
     L_corrigido = L0 * CA * CT * CD
     return L_corrigido, CA, CT, CD, declividade
 
 def largura_pista(L0, e):
-    if e < 15: letra = 'A'
-    elif e < 24: letra = 'B'
-    elif e < 36: letra = 'C'
-    elif e < 52: letra = 'D'
-    elif e < 65: letra = 'E'
-    elif e < 80: letra = 'F'
-    else: return None  
+    """
+    Determina a largura da pista cruzando o Código de Referência (L0) e Letra (e).
+    """
+    if e < 15:
+        letra = 'A'
+    elif e < 24:
+        letra = 'B'
+    elif e < 36:
+        letra = 'C'
+    elif e < 52:
+        letra = 'D'
+    elif e < 65:
+        letra = 'E'
+    elif e < 80:
+        letra = 'F'
+    else:
+        return None  
 
-    if L0 < 800:
+    if L0 < 800: # Código 1
         if letra in ['A', 'B']: return 18
         elif letra == 'C': return 23
         else: return None
-    elif L0 < 1200:
+        
+    elif L0 < 1200: # Código 2
         if letra in ['A', 'B']: return 23
         elif letra == 'C': return 30
         else: return None
-    elif L0 < 1800:
+        
+    elif L0 < 1800: # Código 3
         if letra in ['A', 'B', 'C']: return 30
         elif letra == 'D': return 45
         else: return None
-    else:
+        
+    else: # Código 4
         if letra in ['A', 'B', 'C', 'D', 'E']: return 45
         elif letra == 'F': return 60
+        
     return None
-
-def calcular_vento_cruzado(vel_vento, dir_vento, rumo_pista):
-    angulo = abs(dir_vento - rumo_pista)
-    if angulo > 180:
-        angulo = 360 - angulo
-    vento_cruzado = vel_vento * math.sin(math.radians(angulo))
-    return abs(vento_cruzado)
-
-def determinar_configuracao_pista(df_ventos, limite_vc=15):
-    melhor_rumo = None
-    melhor_cobertura = 0
-    for rumo in range(10, 181, 10):
-        usabilidade = 0
-        for _, row in df_ventos.iterrows():
-            vc = calcular_vento_cruzado(row['velocidade'], row['direcao'], rumo)
-            if vc <= limite_vc:
-                usabilidade += 1
-        cobertura = (usabilidade / len(df_ventos)) * 100
-        if cobertura > melhor_cobertura:
-            melhor_cobertura = cobertura
-            melhor_rumo = rumo
-    precisa_secundaria = melhor_cobertura < 95.0
-    pista_ida = int(melhor_rumo / 10)
-    pista_volta = pista_ida + 18
-    nome_pista = f"{pista_ida:02d}/{pista_volta:02d}"
-    return nome_pista, melhor_cobertura, precisa_secundaria
 
 # MAIN
 
@@ -393,48 +379,21 @@ if __name__ == "__main__":
         nivel = dados["NIVEL_SERVICO"]
         
         if "COMPRIMENTO_BASICO" not in dados:
-            raise ErroInput("COMPRIMENTO_BASICO", "Falta o bloco COMPRIMENTO_BASICO no input.txt")
-        
-        if "COTA_ALTA" not in dados or "COTA_BAIXA" not in dados:
-            raise ErroInput("COTAS_PISTA", "O bloco COTAS_PISTA não foi encontrado ou está formatado errado.")
+            raise ErroInput("COMPRIMENTO_BASICO", "Você precisa adicionar o bloco COMPRIMENTO_BASICO no seu input.txt")
         
         L0 = dados["COMPRIMENTO_BASICO"]
         
-        # Função COTA ALTA e COTA BAIXA
-        Lf, ca, ct, cd, decl_calculada = calcular_pista(L0, dados["ALTITUDE"], dados["TEMPERATURA"], dados["COTA_ALTA"], dados["COTA_BAIXA"])
+        # Chamadas das funções
+        Lf, ca, ct, cd = calcular_pista(L0, dados["ALTITUDE"], dados["TEMPERATURA"], dados["DECLIVIDADE"])
+        
         largura = largura_pista(L0, dados["ENVERGADURA"])
 
         print("\n==== INFRAESTRUTURA DA PISTA ====")
         print(f"Comprimento Básico (L0): {L0} m")
-        print(f"Cotas Topográficas (Alta/Baixa): {dados['COTA_ALTA']}m | {dados['COTA_BAIXA']}m")
-        print(f"Declividade Calculada: {decl_calculada:.2f}%")
         print(f"Fator CA: {ca:.4f} | Fator CT: {ct:.4f} | Fator CD: {cd:.4f}")
         print(f"Comprimento Corrigido (Lf): {Lf:.2f} m")
-        print(f"Largura da Pista: {largura if largura else 'Fora das especificações'} m")
+        print(f"Largura da Pista: {largura if largura else 'Fora das especificações da norma'} m")
 
-        # --- ANÁLISE DE VENTOS ---
-        if dados["ENVERGADURA"] < 24: limite_vento = 10.5
-        elif dados["ENVERGADURA"] < 36: limite_vento = 13.0
-        else: limite_vento = 20.0
-
-        try:
-            df_ventos = pd.read_csv("historico_ventos.csv")
-        except FileNotFoundError:
-            print("\n[!] Aviso: 'historico_ventos.csv' não encontrado. Gerando ventos sintéticos para demonstração...")
-            df_ventos = pd.DataFrame({
-                'direcao': np.random.randint(0, 360, 1000),
-                'velocidade': np.random.uniform(2, 25, 1000)
-            })
-
-        pista_ideal, cobertura, secundaria = determinar_configuracao_pista(df_ventos, limite_vento)
-        print("\n==== LOCAÇÃO E GEOMETRIA DA PISTA ====")
-        print(f"Orientação Magnética: Cabeceiras {pista_ideal}")
-        print(f"Cobertura de Vento Calculada: {cobertura:.2f}% do tempo operável")
-
-        if secundaria: print(">>> RECOMENDAÇÃO: O projeto exigirá pistas transversais (cobertura < 95%).")
-        else: print(">>> CONFIGURAÇÃO: Pista única atende aos requisitos (> 95%).")
-
-        # --- DEMANDA ---
         if dados.get("DEMANDA_ANUAL") == "CALCULAR":
             cidade_alvo = dados["CIDADE_ALVO"]
             print(f"\n>> Iniciando processamento de séries temporais para o horizonte {anos}...")
@@ -449,11 +408,17 @@ if __name__ == "__main__":
             
             print(f"\n{'='*15} ANO DE PROJETO: {ano} {'='*15}")
             print(f"Demanda Anual Projetada: {d:,.0f} pax/ano")
-            print(f"PHP: {php:.2f} pax/hora-pico")
+            print(f"FHP: {fhp} | PHP: {php:.2f} pax/hora-pico")
             
             print(f"\n-- DIMENSIONAMENTO DO TERMINAL (NÍVEL {nivel}) --")
-            for k, v in areas.items(): print(f"  > {k:<25}: {v:>8.2f} m²")
-            print(f"\n>> ÁREA TOTAL: {total:>8.2f} m²")
+            print(f"Balcões de check-in: {balcoes}")
+            print(f"Balcões de venda de bilhetes: {n_bilhetes}")
+            print("\nÁreas Calculadas:")
+            
+            for k, v in areas.items():
+                print(f"  > {k:<25}: {v:>8.2f} m²")
+                
+            print(f"\n>> ÁREA TOTAL (MÍNIMA) DO TERMINAL: {total:>8.2f} m²")
 
     except ErroInput as e:
         print("\n*** ERRO DE EXECUÇÃO ***")
