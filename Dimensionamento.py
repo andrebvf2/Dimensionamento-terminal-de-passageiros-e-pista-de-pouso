@@ -10,24 +10,22 @@ import re
 import os
 import logging
 
-# Configuração de log sugerida
+# Configuração de log 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
 
 # FUNÇÕES AUXILIARES
 
 def normalizar(txt):
     """Remove acentos, espaços extras, parênteses e converte para minúsculas."""
     if pd.isna(txt): return ""
-    # Remove o que estiver dentro de parênteses (comum na base da ANAC: "CIDADE (UF)")
     txt = re.sub(r'\(.*?\)', '', str(txt))
-    # Remove códigos numéricos do IBGE no início da string
     txt = re.sub(r'^\d+\s*', '', txt)
     return unicodedata.normalize('NFKD', txt).encode('ascii', 'ignore').decode().lower().strip()
 
-
 # BLOCOS DO INPUT
 
-BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "DECLIVIDADE", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO"]
+BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "COTAS_PISTA", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO", "COMPRIMENTO_BASICO"]
 
 def eh_bloco(linha):
     return linha in BLOCOS
@@ -36,19 +34,15 @@ def eh_bloco(linha):
 # CARREGAMENTO E CONSOLIDAÇÃO DE DADOS
 
 def carregar_bases_locais():
-    """Lê População, PIB (PIB2023.csv) e ANAC, unindo-os de forma resiliente."""
     files = ["ibge_limpo.csv", "PIB2023.csv", "anac.csv"]
     for f in files:
         if not os.path.exists(f):
             raise ErroInput("ARQUIVO", f"Arquivo '{f}' não encontrado na pasta atual.")
 
     try:
-        # 1. Carrega População
         df_pop = pd.read_csv("ibge_limpo.csv", encoding='utf-8')
         df_pop["cidade_norm"] = df_pop["cidade"].apply(normalizar)
 
-        # 2. Carrega PIB (PIB2023.csv)
-        # O PIB do SIDRA tem cabeçalho na linha 3
         df_pib_raw = pd.read_csv("PIB2023.csv", sep=None, engine='python', encoding='utf-8-sig', skiprows=3)
         df_pib_raw.columns = df_pib_raw.columns.str.strip().str.lower()
         
@@ -60,12 +54,9 @@ def carregar_bases_locais():
             'pib_valor': pd.to_numeric(df_pib_raw[col_val_pib], errors='coerce')
         }).dropna()
 
-        # 3. Une População e PIB (Merge)
         df_ibge = pd.merge(df_pop, df_pib, on="cidade_norm", how="left")
-        # Se o PIB vier vazio de algum arquivo, preenche-se com 0 para evitar erro no cálculo do score
         df_ibge["pib"] = df_ibge["pib_valor"].fillna(0)
 
-        # 4. Carrega ANAC
         df_anac = pd.read_csv("anac.csv", sep=None, engine='python', on_bad_lines='skip', encoding='utf-8')
         df_anac.columns = df_anac.columns.str.strip().str.lower()
         
@@ -84,7 +75,6 @@ def get_dados_ibge(cidade_nome, df_ibge):
     linha = df_ibge[df_ibge["cidade_norm"] == cidade_norm]
     
     if linha.empty:
-        # Tenta uma busca parcial caso não encontre exato
         linha = df_ibge[df_ibge["cidade_norm"].str.contains(cidade_norm, na=False)]
         
     if linha.empty:
@@ -93,27 +83,20 @@ def get_dados_ibge(cidade_nome, df_ibge):
     populacao = float(linha.iloc[0]["populacao"])
     pib = float(linha.iloc[0]["pib"])
     
-    # Prevenção: Se o PIB for zero, usamos uma média regional para não quebrar o score
     if pib <= 0:
         pib = 20000.0 
         
     return populacao, pib
 
-# PREVISÃO DE DEMANDA (ANAC + MMQ)
+# PREVISÃO DE DEMANDA 
 
 def selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac):
-    """Cruza IBGE e ANAC garantindo que os nomes normalizados batam."""
     cidades_com_aeroporto = df_anac["mun_norm"].unique()
-    
-    # Filtra no IBGE apenas cidades que existem na base da ANAC
     df_filtrado = df_ibge[df_ibge["cidade_norm"].isin(cidades_com_aeroporto)].copy()
     
     if df_filtrado.empty:
-        exemplo_anac = cidades_com_aeroporto[:3]
-        exemplo_ibge = df_ibge["cidade_norm"].iloc[:3].tolist()
-        raise ErroInput("DADOS", f"Não foi possível cruzar IBGE e ANAC.\nEx ANAC: {exemplo_anac}\nEx IBGE: {exemplo_ibge}")
+        raise ErroInput("DADOS", "Não foi possível cruzar IBGE e ANAC.")
 
-    # Cálculo de Score Logarítmico
     pop_alvo_log = np.log1p(pop_alvo)
     pib_alvo_log = np.log1p(pib_alvo)
 
@@ -122,7 +105,15 @@ def selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac):
         abs(np.log1p(df_filtrado["pib"]) - pib_alvo_log) / pib_alvo_log
     )
     
-    return df_filtrado.sort_values("score")["cidade_norm"].head(8).tolist()
+    anomalias_conhecidas = ["fernando de noronha", "porto seguro", "gramado", "rio de janeiro", "sao paulo", "belem"]
+    df_filtrado = df_filtrado[~df_filtrado["cidade_norm"].isin(anomalias_conhecidas)]
+    
+    df_filtrado = df_filtrado[
+        (df_filtrado["populacao"] <= pop_alvo * 10) & 
+        (df_filtrado["populacao"] >= pop_alvo * 0.1)
+    ]
+    
+    return df_filtrado.sort_values("score")["cidade_norm"].head(5).tolist()
 
 def obter_series_anac(cidades_norm, df_anac):
     historico = []
@@ -132,12 +123,12 @@ def obter_series_anac(cidades_norm, df_anac):
             df_cidade = df_cidade.sort_values("ano_mes")
             if len(df_cidade) >= 60:
                 serie = df_cidade["passageiros"].tail(60).values
-                historico.append(serie.tolist())
+                historico.append((cidade, serie.tolist()))
     return historico
 
-def prever_demanda_cidade(demandas_60_meses, anos_projecao, ano_base):
+def prever_demanda_cidade(demandas_60_meses, anos_projecao, ano_base, nome_cidade="", imprimir_demonstracao=False):
     n_meses = 60
-    # Lógica de MMQ 
+    
     mm_desc = [sum(demandas_60_meses[i:i+12]) / 12 for i in range(n_meses - 11)]
     mmc = [None] * 6
     for i in range(len(mm_desc) - 1):
@@ -145,32 +136,48 @@ def prever_demanda_cidade(demandas_60_meses, anos_projecao, ano_base):
     mmc.extend([None] * 6)
     
     is_mensal = [demandas_60_meses[i] / mmc[i] if mmc[i] else None for i in range(n_meses)]
+    
     is_medio = []
     for mes in range(12):
         valores_mes = [is_mensal[i] for i in range(mes, n_meses, 12) if is_mensal[i] is not None]
-        is_medio.append(sum(valores_mes) / len(valores_mes) if valores_mes else 1.0)
+        is_medio.append(sum(valores_mes) / len(valores_mes) if len(valores_mes) > 0 else 1.0)
         
-    tendencia = [demandas_60_meses[i] / is_medio[i % 12] for i in range(n_meses)]
-    soma_x = sum(range(1, n_meses + 1))
-    soma_y = sum(tendencia)
-    soma_xy = sum((i+1) * tendencia[i] for i in range(n_meses))
-    soma_x2 = sum((i+1)**2 for i in range(n_meses))
+    tendencia = [
+        demandas_60_meses[i] / is_medio[i % 12] if is_medio[i % 12] != 0 else 0 
+        for i in range(n_meses)
+    ]
+        
+    X1 = 1
+    Y1_rounded = round(tendencia[0]) if len(tendencia) > 0 else 0
     
-    den = (n_meses * soma_x2 - soma_x**2)
-    if den == 0: return {ano: 0 for ano in anos_projecao}
-        
-    a = (n_meses * soma_xy - soma_x * soma_y) / den
-    b = (soma_y - a * soma_x) / n_meses
+    num = sum((i + 1 - X1) * (tendencia[i] - Y1_rounded) for i in range(n_meses))
+    den = sum((i + 1 - X1)**2 for i in range(n_meses))
+    a = num / den if den != 0 else 0
+    b = Y1_rounded - a
+    
+    if imprimir_demonstracao:
+        print("\n" + "#"*60)
+        print(f"📊 DEMONSTRAÇÃO DA EQUAÇÃO: {nome_cidade.upper()} (Método Ancorado)")
+        print("#"*60)
+        print(f"Coeficiente Angular (a): {a:.4f}")
+        print(f"Coeficiente Linear  (b): {b:.4f}")
+        print(f">> Equação Calculada Dinamicamente: Y = {a:.4f} * X + {b:.4f} <<")
+        print("#"*60 + "\n")
     
     resultados = {}
     for ano in anos_projecao:
-        distancia_anos = ano - ano_base
-        mes_fim = distancia_anos * 12
-        mes_inicio = mes_fim - 12
+        delta_anos = ano - ano_base
+        mes_inicio = 60 + (delta_anos - 1) * 12
+        mes_fim = mes_inicio + 12
+        
         demanda_anual = 0
         for i in range(mes_inicio, mes_fim):
-            nova_tendencia = a * (i + 1) + b
-            demanda_anual += max(0, nova_tendencia * is_medio[i % 12])
+            mes_idx = i % 12
+            x_atual = i + 1
+            nova_tendencia = a * x_atual + b
+            demanda_mes = max(0, nova_tendencia * is_medio[mes_idx])
+            demanda_anual += demanda_mes
+            
         resultados[ano] = demanda_anual
     return resultados
 
@@ -178,21 +185,28 @@ def calcular_demanda_real(cidade, anos, ano_base):
     df_ibge, df_anac = carregar_bases_locais()
     pop_alvo, pib_alvo = get_dados_ibge(cidade, df_ibge)
     
-    print(f">> Perfil: {cidade.title()} | Pop: {pop_alvo:,.0f} | PIB: R$ {pib_alvo:,.2f}")
+    print(f">> Perfil Alvo: {cidade.title()} | Pop: {pop_alvo:,.0f} | PIB: R$ {pib_alvo:,.2f}")
     
     cidades_similares = selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac)
-    print(f">> Cidades Similares ANAC: {', '.join(cidades_similares)}")
+    print(f">> Cidades Similares Selecionadas: {', '.join([c.title() for c in cidades_similares])}")
     
-    series = obter_series_anac(cidades_similares, df_anac)
+    series_com_nomes = obter_series_anac(cidades_similares, df_anac)
     
-    if len(series) < 3:
-        raise ErroInput("DADOS", "Poucas cidades similares encontradas com histórico de 5 anos.")
+    if len(series_com_nomes) == 0:
+        raise ErroInput("DADOS", "Nenhuma cidade similar possui o histórico contínuo de 60 meses necessário para a regressão matemática.")
         
     resultado = {ano: 0 for ano in anos}
-    for serie in series:
-        prev = prever_demanda_cidade(serie, anos, ano_base)
+    
+    for indice, (cid_similar, serie) in enumerate(series_com_nomes):
+        deve_imprimir = (indice == 0) 
+        prev_bruta = prever_demanda_cidade(serie, anos, ano_base, cid_similar, deve_imprimir)
+        
+        pop_similar, _ = get_dados_ibge(cid_similar, df_ibge)
+        
         for ano in anos:
-            resultado[ano] += prev[ano] / len(series)
+            taxa_per_capita = prev_bruta[ano] / pop_similar
+            demanda_cidade_alvo = taxa_per_capita * pop_alvo
+            resultado[ano] += demanda_cidade_alvo / len(series_com_nomes)
             
     return resultado
 
@@ -227,10 +241,19 @@ def ler_arquivo_input(caminho):
             dados["ALTITUDE"] = validar_numero(linhas[i+1], "ALTITUDE")
         elif linha == "TEMPERATURA":
             dados["TEMPERATURA"] = validar_numero(linhas[i+1], "TEMPERATURA")
-        elif linha == "DECLIVIDADE":
-            dados["DECLIVIDADE"] = validar_numero(linhas[i+1], "DECLIVIDADE")
+            
+        # LEITURA DE COTAS:
+        elif linha == "COTAS_PISTA":
+            v = linhas[i+1].split()
+            if len(v) < 2:
+                erro("COTAS_PISTA", "Você precisa fornecer dois valores numéricos. Ex: 565 550")
+            dados["COTA_ALTA"] = validar_numero(v[0], "COTA_ALTA")
+            dados["COTA_BAIXA"] = validar_numero(v[1], "COTA_BAIXA")
+            
         elif linha == "ENVERGADURA":
             dados["ENVERGADURA"] = validar_positivo(linhas[i+1], "ENVERGADURA")
+        elif linha == "COMPRIMENTO_BASICO":
+            dados["COMPRIMENTO_BASICO"] = validar_numero(linhas[i+1], "COMPRIMENTO_BASICO")
         elif linha == "DEMANDA_ANUAL":
             valor = linhas[i+1].upper()
             if "CALCULAR" in valor:
@@ -250,10 +273,7 @@ def ler_arquivo_input(caminho):
         i += 1
     return dados
 
-
 # CÁLCULOS FÍSICOS E ÁREAS
-
-#Calculo da Area dos terminais
 
 def fator_hora_pico(d):
     if d < 100000: return 0.169
@@ -292,34 +312,76 @@ def dimensionar_terminal(php, nivel):
     
     return areas, sum(areas.values()), balcoes, n_bilhetes
 
-#Calculo da pista de pouso do aeroporto 
+# Função para calcular declividade e receber cota
+def calcular_pista(L0, alt, temp, cota_alta, cota_baixa):
+    """
+    Calcula o comprimento corrigido da pista de pouso a partir das cotas físicas.
+    """
+    # Diferença das cotas / comprimento de referência
+    diferenca_cotas = abs(cota_alta - cota_baixa)
+    declividade = (diferenca_cotas / L0) * 100
+    
+    CA = (alt / 300) * 0.07 + 1.00
+    TP = 15 - 0.0066 * alt
+    CT = 1.00 + (temp - TP) * 0.01
+    
+    # Aplica o Fator de Correção CD
+    CD = 1.00 + (declividade * 0.10)
+    
+    L_corrigido = L0 * CA * CT * CD
+    return L_corrigido, CA, CT, CD, declividade
 
-def obter_L0(e):
-    if e < 15: return 800
-    elif e < 24: return 1000
-    elif e < 36: return 1200
-    elif e < 52: return 1800
-    elif e < 65: return 2400
-    else: return 3000
+def largura_pista(L0, e):
+    if e < 15: letra = 'A'
+    elif e < 24: letra = 'B'
+    elif e < 36: letra = 'C'
+    elif e < 52: letra = 'D'
+    elif e < 65: letra = 'E'
+    elif e < 80: letra = 'F'
+    else: return None  
 
-def calcular_pista(L0, alt, temp, decl):
-    CA = (alt/300)*0.07 + 1
-    TP = 15 - 0.0066*alt
-    CT = 1 + (temp - TP)*0.01
-    CD = 1 + decl*0.10
-    return L0 * CA * CT * CD
-
-def largura_pista(L, e):
-    if L < 800:
-        return 18 if e < 24 else 23
-    elif L < 1200:
-        return 23 if e < 24 else 30
-    elif L < 1800:
-        return 30 if e < 36 else 45
+    if L0 < 800:
+        if letra in ['A', 'B']: return 18
+        elif letra == 'C': return 23
+        else: return None
+    elif L0 < 1200:
+        if letra in ['A', 'B']: return 23
+        elif letra == 'C': return 30
+        else: return None
+    elif L0 < 1800:
+        if letra in ['A', 'B', 'C']: return 30
+        elif letra == 'D': return 45
+        else: return None
     else:
-        if e < 65: return 45
-        elif e <= 80: return 60
+        if letra in ['A', 'B', 'C', 'D', 'E']: return 45
+        elif letra == 'F': return 60
     return None
+
+def calcular_vento_cruzado(vel_vento, dir_vento, rumo_pista):
+    angulo = abs(dir_vento - rumo_pista)
+    if angulo > 180:
+        angulo = 360 - angulo
+    vento_cruzado = vel_vento * math.sin(math.radians(angulo))
+    return abs(vento_cruzado)
+
+def determinar_configuracao_pista(df_ventos, limite_vc=15):
+    melhor_rumo = None
+    melhor_cobertura = 0
+    for rumo in range(10, 181, 10):
+        usabilidade = 0
+        for _, row in df_ventos.iterrows():
+            vc = calcular_vento_cruzado(row['velocidade'], row['direcao'], rumo)
+            if vc <= limite_vc:
+                usabilidade += 1
+        cobertura = (usabilidade / len(df_ventos)) * 100
+        if cobertura > melhor_cobertura:
+            melhor_cobertura = cobertura
+            melhor_rumo = rumo
+    precisa_secundaria = melhor_cobertura < 95.0
+    pista_ida = int(melhor_rumo / 10)
+    pista_volta = pista_ida + 18
+    nome_pista = f"{pista_ida:02d}/{pista_volta:02d}"
+    return nome_pista, melhor_cobertura, precisa_secundaria
 
 # MAIN
 
@@ -330,14 +392,49 @@ if __name__ == "__main__":
         ano_zero = dados["ANO_ZERO"]
         nivel = dados["NIVEL_SERVICO"]
         
-        L0 = obter_L0(dados["ENVERGADURA"])
-        Lf = calcular_pista(L0, dados["ALTITUDE"], dados["TEMPERATURA"], dados["DECLIVIDADE"])
-        largura = largura_pista(Lf, dados["ENVERGADURA"])
+        if "COMPRIMENTO_BASICO" not in dados:
+            raise ErroInput("COMPRIMENTO_BASICO", "Falta o bloco COMPRIMENTO_BASICO no input.txt")
+        
+        if "COTA_ALTA" not in dados or "COTA_BAIXA" not in dados:
+            raise ErroInput("COTAS_PISTA", "O bloco COTAS_PISTA não foi encontrado ou está formatado errado.")
+        
+        L0 = dados["COMPRIMENTO_BASICO"]
+        
+        # Função COTA ALTA e COTA BAIXA
+        Lf, ca, ct, cd, decl_calculada = calcular_pista(L0, dados["ALTITUDE"], dados["TEMPERATURA"], dados["COTA_ALTA"], dados["COTA_BAIXA"])
+        largura = largura_pista(L0, dados["ENVERGADURA"])
 
         print("\n==== INFRAESTRUTURA DA PISTA ====")
-        print(f"Comprimento: {Lf:.2f} m")
-        print(f"Largura: {largura if largura else 'Não aplicável'} m")
+        print(f"Comprimento Básico (L0): {L0} m")
+        print(f"Cotas Topográficas (Alta/Baixa): {dados['COTA_ALTA']}m | {dados['COTA_BAIXA']}m")
+        print(f"Declividade Calculada: {decl_calculada:.2f}%")
+        print(f"Fator CA: {ca:.4f} | Fator CT: {ct:.4f} | Fator CD: {cd:.4f}")
+        print(f"Comprimento Corrigido (Lf): {Lf:.2f} m")
+        print(f"Largura da Pista: {largura if largura else 'Fora das especificações'} m")
 
+        # --- ANÁLISE DE VENTOS ---
+        if dados["ENVERGADURA"] < 24: limite_vento = 10.5
+        elif dados["ENVERGADURA"] < 36: limite_vento = 13.0
+        else: limite_vento = 20.0
+
+        try:
+            df_ventos = pd.read_csv("historico_ventos.csv")
+        except FileNotFoundError:
+            print("\n[!] Aviso: 'historico_ventos.csv' não encontrado. Gerando ventos sintéticos para demonstração...")
+            df_ventos = pd.DataFrame({
+                'direcao': np.random.randint(0, 360, 1000),
+                'velocidade': np.random.uniform(2, 25, 1000)
+            })
+
+        pista_ideal, cobertura, secundaria = determinar_configuracao_pista(df_ventos, limite_vento)
+        print("\n==== LOCAÇÃO E GEOMETRIA DA PISTA ====")
+        print(f"Orientação Magnética: Cabeceiras {pista_ideal}")
+        print(f"Cobertura de Vento Calculada: {cobertura:.2f}% do tempo operável")
+
+        if secundaria: print(">>> RECOMENDAÇÃO: O projeto exigirá pistas transversais (cobertura < 95%).")
+        else: print(">>> CONFIGURAÇÃO: Pista única atende aos requisitos (> 95%).")
+
+        # --- DEMANDA ---
         if dados.get("DEMANDA_ANUAL") == "CALCULAR":
             cidade_alvo = dados["CIDADE_ALVO"]
             print(f"\n>> Iniciando processamento de séries temporais para o horizonte {anos}...")
@@ -351,18 +448,12 @@ if __name__ == "__main__":
             areas, total, balcoes, n_bilhetes = dimensionar_terminal(php, nivel)
             
             print(f"\n{'='*15} ANO DE PROJETO: {ano} {'='*15}")
-            print(f"Demanda Anual Projetada: {d:.0f} pax/ano")
-            print(f"FHP: {fhp} | PHP: {php:.2f} pax/hora-pico")
+            print(f"Demanda Anual Projetada: {d:,.0f} pax/ano")
+            print(f"PHP: {php:.2f} pax/hora-pico")
             
-            print("\n-- DIMENSIONAMENTO DO TERMINAL --")
-            print(f"Balcões de check-in: {balcoes}")
-            print(f"Balcões de venda de bilhetes: {n_bilhetes}")
-            print("\nÁreas Calculadas:")
-            
-            for k, v in areas.items():
-                print(f"  > {k}: {v:.2f} m²")
-                
-            print(f"\n>> ÁREA TOTAL DO TERMINAL: {total:.2f} m²")
+            print(f"\n-- DIMENSIONAMENTO DO TERMINAL (NÍVEL {nivel}) --")
+            for k, v in areas.items(): print(f"  > {k:<25}: {v:>8.2f} m²")
+            print(f"\n>> ÁREA TOTAL: {total:>8.2f} m²")
 
     except ErroInput as e:
         print("\n*** ERRO DE EXECUÇÃO ***")
