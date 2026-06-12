@@ -1,7 +1,6 @@
 # DIMENSIONAMENTO PRELIMINAR E PREVISÃO DE DEMANDA
 # LEITOR DE INPUT + DADOS IBGE CSV + DADOS ANAC CSV + SERIES TEMPORAIS + TERMINAL E PISTA
 
-from erros import erro, validar_numero, validar_inteiro, validar_positivo, ErroInput
 import numpy as np
 import pandas as pd
 import math
@@ -10,16 +9,49 @@ import re
 import os
 import logging
 
-# --- NOVAS BIBLIOTECAS PARA A API ---
-import requests
-import datetime
-
 # Configuração de log sugerida
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
+# =========================
+# FUNÇÕES DE ERRO E FORMATAÇÃO (EMBUTIDAS)
+# =========================
+class ErroInput(Exception):
+    def __init__(self, bloco, mensagem):
+        self.bloco = bloco
+        self.mensagem = mensagem
+        super().__init__(f"[{bloco}] {mensagem}")
 
+def erro(bloco, mensagem):
+    raise ErroInput(bloco, mensagem)
+
+def validar_numero(valor, nome_bloco):
+    try:
+        return float(valor)
+    except ValueError:
+        erro(nome_bloco, f"O valor '{valor}' não é um número válido.")
+
+def validar_inteiro(valor, nome_bloco):
+    try:
+        return int(valor)
+    except ValueError:
+        erro(nome_bloco, f"O valor '{valor}' não é um número inteiro válido.")
+
+def validar_positivo(valor, nome_bloco):
+    num = validar_numero(valor, nome_bloco)
+    if num <= 0:
+        erro(nome_bloco, f"O valor precisa ser maior que zero. Recebido: {num}")
+    return num
+
+def formato_br(valor, casas=2):
+    """Transforma números do padrão americano para o brasileiro (ex: 1.500,50)"""
+    if valor is None: return "N/A"
+    texto = f"{valor:,.{casas}f}"
+    texto = texto.replace(',', 'X').replace('.', ',').replace('X', '.')
+    return texto
+
+# =========================
 # FUNÇÕES AUXILIARES
-
+# =========================
 def normalizar(txt):
     """Remove acentos, espaços extras, parênteses e converte para minúsculas."""
     if pd.isna(txt): return ""
@@ -27,16 +59,17 @@ def normalizar(txt):
     txt = re.sub(r'^\d+\s*', '', txt)
     return unicodedata.normalize('NFKD', txt).encode('ascii', 'ignore').decode().lower().strip()
 
-
+# =========================
 # BLOCOS DO INPUT
-
+# =========================
 BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "COTAS_PISTA", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO", "COMPRIMENTO_BASICO", "MODELO_REGRESSAO"]
 
 def eh_bloco(linha):
     return linha in BLOCOS
 
+# =========================
 # CARREGAMENTO E CONSOLIDAÇÃO DE DADOS
-
+# =========================
 
 def carregar_bases_locais():
     files = ["ibge_limpo.csv", "PIB2023.csv", "anac.csv"]
@@ -93,33 +126,9 @@ def get_dados_ibge(cidade_nome, df_ibge):
         
     return populacao, pib
 
-def obter_estacao_da_cidade(cidade_alvo):
-    """Lê o dicionário de estações lidando com problemas de codificação comuns do Brasil."""
-    try:
-        # Tenta ler no padrão mundial primeiro, se der erro, usa o padrão latino (Windows)
-        try:
-            df_dic = pd.read_csv("dicionario_estacoes.csv", encoding="utf-8")
-        except UnicodeDecodeError:
-            df_dic = pd.read_csv("dicionario_estacoes.csv", encoding="latin-1")
-            
-        df_dic.columns = df_dic.columns.str.lower()
-        
-        col_nome = [c for c in df_dic.columns if 'estacao' in c or 'nome' in c][0]
-        col_id = [c for c in df_dic.columns if 'id_estacao' in c][0]
-        
-        df_dic['nome_norm'] = df_dic[col_nome].astype(str).apply(normalizar)
-        cidade_norm = normalizar(cidade_alvo)
-        
-        match = df_dic[df_dic['nome_norm'].str.contains(cidade_norm)]
-        if not match.empty:
-            return match.iloc[0][col_id]
-            
-    except Exception as e:
-        print(f"\n[!] Erro na leitura do dicionário de estações: {e}")
-        print("DICA: Verifique se o arquivo baixado não está compactado (.zip/.gz). Extraia o arquivo real antes de usar!")
-    return None
-
+# =========================
 # CLASSE DE MODELOS ESTATÍSTICOS
+# =========================
 
 class FuncoesRegressao:
     @staticmethod
@@ -172,7 +181,9 @@ class FuncoesRegressao:
         a = math.exp(A_ln)
         return lambda x: a * math.exp(B * x), f"Y = {a:.4f} * e^({B:.4f} * X)"
 
+# =========================
 # PREVISÃO DE DEMANDA
+# =========================
 
 def selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac):
     cidades_com_aeroporto = df_anac["mun_norm"].unique()
@@ -246,7 +257,7 @@ def prever_demanda_cidade(demandas_60_meses, anos_projecao, ano_base, nome_cidad
         pred_func, eq_str = FuncoesRegressao.exponencial(x_arr, tendencia)
         nome_modelo = "Regressão Exponencial"
     else:
-        raise ErroInput("MODELO_REGRESSAO", "Funcão de regressão não cadastrada. Cadastrar na classe FuncoesRegressao")
+        raise ErroInput("MODELO_REGRESSAO", "Funcão de regressão não cadastrada.")
     
     if imprimir_demonstracao:
         print("\n" + "#"*70)
@@ -276,7 +287,7 @@ def calcular_demanda_real(cidade, anos, ano_base, modelo_id):
     df_ibge, df_anac = carregar_bases_locais()
     pop_alvo, pib_alvo = get_dados_ibge(cidade, df_ibge)
     
-    print(f">> Perfil Alvo: {cidade.title()} | Pop: {pop_alvo:,.0f} | PIB: R$ {pib_alvo:,.2f}")
+    print(f">> Perfil Alvo: {cidade.title()} | Pop: {formato_br(pop_alvo, 0)} | PIB: R$ {formato_br(pib_alvo, 2)}")
     
     cidades_similares = selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac)
     print(f">> Cidades Similares Selecionadas: {', '.join([c.title() for c in cidades_similares])}")
@@ -284,7 +295,7 @@ def calcular_demanda_real(cidade, anos, ano_base, modelo_id):
     series_com_nomes = obter_series_anac(cidades_similares, df_anac)
     
     if len(series_com_nomes) == 0:
-        raise ErroInput("DADOS", "Nenhuma cidade similar possui o histórico contínuo de 60 meses necessário para a regressão matemática.")
+        raise ErroInput("DADOS", "Nenhuma cidade similar possui o histórico de 60 meses.")
         
     resultado = {ano: 0 for ano in anos}
     
@@ -301,17 +312,17 @@ def calcular_demanda_real(cidade, anos, ano_base, modelo_id):
             
     return resultado
 
+# =========================
 # LEITURA DE INPUT
+# =========================
 
 def ler_populacao(linha):
     v = linha.split()
     if len(v) < 3:
         erro("POPULACAO", "dados incompletos. Forneça: ANO_INICIO INTERVALO NUM_INTERVALOS")
-    
     ano_inicio = validar_inteiro(v[0], "ANO_INICIO")
     intervalo = validar_inteiro(v[1], "INTERVALO")
     n = validar_inteiro(v[2], "NUM_INTERVALOS")
-    
     anos = [ano_inicio + (intervalo * i) for i in range(1, n+1)]
     return anos, ano_inicio
 
@@ -353,8 +364,7 @@ def ler_arquivo_input(caminho):
             if "CALCULAR" in valor:
                 partes = valor.split()
                 if len(partes) < 2:
-                    erro("DEMANDA_ANUAL", "Cidade não informada após CALCULAR. Ex: CALCULAR Picos")
-                
+                    erro("DEMANDA_ANUAL", "Cidade não informada após CALCULAR.")
                 dados["CIDADE_ALVO"] = " ".join(partes[1:]).title() 
                 dados["DEMANDA_ANUAL"] = "CALCULAR"
             else:
@@ -367,7 +377,9 @@ def ler_arquivo_input(caminho):
         i += 1
     return dados
 
+# =========================
 # CÁLCULOS FÍSICOS E ÁREAS
+# =========================
 
 def fator_hora_pico(d):
     if d < 100000: return 0.169
@@ -470,69 +482,54 @@ def determinar_configuracao_pista(df_ventos, limite_vc=15):
     nome_pista = f"{pista_ida:02d}/{pista_volta:02d}"
     return nome_pista, melhor_cobertura, precisa_secundaria
 
-# --- INTEGRAÇÃO COM API DO INMET ---
-def buscar_ventos_inmet_api(codigo_estacao, anos_historico=5):
-    """
-    Busca o histórico de ventos do INMET contornando o firewall governamental 
-    com headers de navegador (User-Agent).
-    """
-    print(f"\n>> Conectando à API do INMET para a estação {codigo_estacao}...")
-    ano_atual = datetime.datetime.now().year
-    df_ventos_total = pd.DataFrame()
-    
-    #  Python se passa por um navegador Chrome padrão
-    cabecalhos = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json"
-    }
-    
-    # Loop de requisições anuais para não engasgar o servidor
-    for ano in range(ano_atual - anos_historico, ano_atual):
-        data_inicio = f"{ano}-01-01"
-        data_fim = f"{ano}-12-31"
-        url = f"https://apitempo.inmet.gov.br/estacao/{data_inicio}/{data_fim}/{codigo_estacao}"
-        
-        try:
-            # Enviamos a requisição com o cabeçalho camuflado e aguardamos 40s
-            resposta = requests.get(url, headers=cabecalhos, timeout=40)
-            resposta.raise_for_status()
+# --- LEITURA EXCLUSIVA DE ARQUIVO LOCAL (BLINDADA CONTRA O INMET) ---
+def buscar_ventos_local(nome_arquivo="historico_ventos.csv"):
+    print(f"\n>> Lendo base de dados local: {nome_arquivo}...")
+    try:
+        # 1. Descobre automaticamente em qual linha o cabeçalho real começa
+        with open(nome_arquivo, 'r', encoding='latin-1') as f:
+            linhas = f.readlines()
             
-            # Tenta converter a resposta para JSON
-            try:
-                dados_json = resposta.json()
-            except ValueError:
-                print(f"  - {ano}: O servidor bloqueou a requisição ou retornou página HTML.")
-                continue
-                
-            # Verifica se o JSON retornou vazio ou com aviso de falta de dados
-            if not dados_json or "mensagem" in dados_json:
-                print(f"  - {ano}: Sem dados meteorológicos registrados nesta estação.")
-                continue
-                
-            # Converte para DataFrame e extrai apenas a cinemática dos ventos
-            df_ano = pd.DataFrame(dados_json)
-            df_temp = pd.DataFrame()
-            df_temp['direcao'] = pd.to_numeric(df_ano.get('VEN_DIR'), errors='coerce')
-            df_temp['velocidade'] = pd.to_numeric(df_ano.get('VEN_VEL'), errors='coerce')
-            df_temp = df_temp.dropna()
-            
-            # Concatena os dados limpos ao histórico geral
-            df_ventos_total = pd.concat([df_ventos_total, df_temp])
-            print(f"  - {ano}: {len(df_temp)} registros de vento importados com sucesso.")
-            
-        except requests.exceptions.RequestException:
-            print(f"  - {ano}: Conexão com o INMET interrompida ou lenta demais.")
-            continue
-            
-    if df_ventos_total.empty:
-        return None
-        
-    print(f">> Total consolidado: {len(df_ventos_total)} registros prontos para cálculo.")
-    return df_ventos_total
-        
+        linha_cabecalho = 0
+        for i, linha in enumerate(linhas[:20]):
+            if 'data' in linha.lower() or 'vento' in linha.lower():
+                linha_cabecalho = i
+                break
 
+        # 2. Lê o CSV a partir da linha certa
+        df_completo = pd.read_csv(nome_arquivo, sep=';', skiprows=linha_cabecalho, encoding='latin-1')
+        
+        # 3. Limpeza EXTREMA: remove acentos, espaços, parênteses e deixa só letras
+        def limpar_coluna(nome):
+            texto = unicodedata.normalize('NFKD', str(nome)).encode('ascii', 'ignore').decode().lower()
+            return re.sub(r'[^a-z]', '', texto)
+            
+        df_completo.columns = [limpar_coluna(c) for c in df_completo.columns]
+        
+        # 4. Caça as colunas pelas letras que sobraram
+        col_dir = next((c for c in df_completo.columns if 'dir' in c and 'vento' in c), None)
+        col_vel = next((c for c in df_completo.columns if 'vel' in c and 'vento' in c), None)
+        
+        if not col_dir or not col_vel:
+            raise ValueError("Colunas de vento não encontradas mesmo após a limpeza.")
+        
+        # 5. Monta a tabela final e converte as vírgulas brasileiras para pontos decimais
+        df_ventos = pd.DataFrame()
+        df_ventos['direcao'] = df_completo[col_dir].astype(str).str.replace(',', '.').apply(pd.to_numeric, errors='coerce')
+        df_ventos['velocidade'] = df_completo[col_vel].astype(str).str.replace(',', '.').apply(pd.to_numeric, errors='coerce')
+        
+        df_ventos = df_ventos.dropna()
+        
+        print(f">> Sucesso! {len(df_ventos)} registros reais de vento prontos para cálculo.")
+        return df_ventos
 
+    except Exception as e:
+        print(f"\n[!] Erro na leitura do arquivo: {e}")
+        print(">> Gerando ventos simulados de segurança para o programa não travar...")
+        return pd.DataFrame({'direcao': np.random.randint(0, 360, 1000), 'velocidade': np.random.uniform(2, 25, 1000)})
+# =========================
 # MAIN
+# =========================
 
 if __name__ == "__main__":
     try:
@@ -555,45 +552,26 @@ if __name__ == "__main__":
         largura = largura_pista(L0, dados["ENVERGADURA"])
 
         print("\n==== INFRAESTRUTURA DA PISTA ====")
-        print(f"Comprimento Básico (L0): {L0} m")
-        print(f"Cotas Topográficas (Alta/Baixa): {dados['COTA_ALTA']}m | {dados['COTA_BAIXA']}m")
-        print(f"Declividade Calculada: {decl_calculada:.2f}%")
-        print(f"Fator CA: {ca:.4f} | Fator CT: {ct:.4f} | Fator CD: {cd:.4f}")
-        print(f"Comprimento Corrigido (Lf): {Lf:.2f} m")
-        print(f"Largura da Pista: {largura if largura else 'Fora das especificações'} m")
+        print(f"Comprimento Básico (L0): {formato_br(L0)} m")
+        print(f"Cotas Topográficas (Alta/Baixa): {formato_br(dados['COTA_ALTA'])}m | {formato_br(dados['COTA_BAIXA'])}m")
+        print(f"Declividade Calculada: {formato_br(decl_calculada)}%")
+        print(f"Fator CA: {formato_br(ca, 4)} | Fator CT: {formato_br(ct, 4)} | Fator CD: {formato_br(cd, 4)}")
+        print(f"Comprimento Corrigido (Lf): {formato_br(Lf)} m")
+        print(f"Largura da Pista: {formato_br(largura, 0) if largura else 'Fora das especificações'} m")
 
-        # --- ANÁLISE DE VENTOS VIA API ---
+        # --- ANÁLISE DE VENTOS (ARQUIVO LOCAL) ---
         if dados["ENVERGADURA"] < 24: limite_vento = 10.5
         elif dados["ENVERGADURA"] < 36: limite_vento = 13.0
         else: limite_vento = 20.0
 
-        codigo_estacao = None
-        if dados.get("DEMANDA_ANUAL") == "CALCULAR":
-            cidade_alvo = dados["CIDADE_ALVO"]
-            codigo_estacao = obter_estacao_da_cidade(cidade_alvo)
-            
-        # Se a cidade não estiver no dicionário, usa Teresina como backup de segurança
-        if not codigo_estacao:
-            print("\n[!] Cidade não encontrada no dicionário de estações ou nome inválido.")
-            print(">> Aplicando a estação meteorológica A312 (Teresina) como Padrão/Teste.")
-            codigo_estacao = "A312"
+        # Chama diretamente a função que lê o arquivo CSV baixado
+        df_ventos_local = buscar_ventos_local("historico_ventos.csv")
 
-        # Conecta na internet e baixa os ventos!
-        df_ventos_api = buscar_ventos_inmet_api(codigo_estacao, anos_historico=5)
-
-        # Se a internet cair ou o INMET estiver fora do ar, cria dados simulados para não travar o projeto
-        if df_ventos_api is None or df_ventos_api.empty:
-            print("\n[!] Gerando ventos sintéticos de segurança devido a falha na API...")
-            df_ventos_api = pd.DataFrame({
-                'direcao': np.random.randint(0, 360, 1000),
-                'velocidade': np.random.uniform(2, 25, 1000)
-            })
-
-        pista_ideal, cobertura, secundaria = determinar_configuracao_pista(df_ventos_api, limite_vento)
+        pista_ideal, cobertura, secundaria = determinar_configuracao_pista(df_ventos_local, limite_vento)
         
         print("\n==== LOCAÇÃO E GEOMETRIA DA PISTA ====")
         print(f"Orientação Magnética: Cabeceiras {pista_ideal}")
-        print(f"Cobertura de Vento Calculada: {cobertura:.2f}% do tempo operável")
+        print(f"Cobertura de Vento Calculada: {formato_br(cobertura)}% do tempo operável")
 
         if secundaria: print(">>> RECOMENDAÇÃO: O projeto exigirá pistas transversais (cobertura < 95%).")
         else: print(">>> CONFIGURAÇÃO: Pista única atende aos requisitos (> 95%).")
@@ -612,15 +590,15 @@ if __name__ == "__main__":
             areas, total, balcoes, n_bilhetes = dimensionar_terminal(php, nivel)
             
             print(f"\n{'='*15} ANO DE PROJETO: {ano} {'='*15}")
-            print(f"Demanda Anual Projetada: {d:,.0f} pax/ano")
-            print(f"PHP: {php:.2f} pax/hora-pico")
+            print(f"Demanda Anual Projetada: {formato_br(d, 0)} pax/ano")
+            print(f"PHP: {formato_br(php)} pax/hora-pico")
             
             print(f"\n-- DIMENSIONAMENTO DO TERMINAL (NÍVEL {nivel}) --")
-            for k, v in areas.items(): print(f"  > {k:<25}: {v:>8.2f} m²")
-            print(f"\n>> ÁREA TOTAL: {total:>8.2f} m²")
+            for k, v in areas.items(): print(f"  > {k:<25}: {formato_br(v)} m²")
+            print(f"\n>> ÁREA TOTAL: {formato_br(total)} m²")
 
     except ErroInput as e:
         print("\n*** ERRO DE EXECUÇÃO ***")
-        print(e)
+        print(e.mensagem)
     except Exception as e:
         print(f"\n*** ERRO INESPERADO ***\n{e}")
