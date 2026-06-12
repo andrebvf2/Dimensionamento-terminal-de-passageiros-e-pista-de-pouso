@@ -12,9 +12,9 @@ import logging
 # Configuração de log sugerida
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# =========================
-# FUNÇÕES DE ERRO E FORMATAÇÃO (EMBUTIDAS)
-# =========================
+
+# FUNÇÕES DE ERRO E FORMATAÇÃO 
+
 class ErroInput(Exception):
     def __init__(self, bloco, mensagem):
         self.bloco = bloco
@@ -49,9 +49,9 @@ def formato_br(valor, casas=2):
     texto = texto.replace(',', 'X').replace('.', ',').replace('X', '.')
     return texto
 
-# =========================
+
 # FUNÇÕES AUXILIARES
-# =========================
+
 def normalizar(txt):
     """Remove acentos, espaços extras, parênteses e converte para minúsculas."""
     if pd.isna(txt): return ""
@@ -59,17 +59,17 @@ def normalizar(txt):
     txt = re.sub(r'^\d+\s*', '', txt)
     return unicodedata.normalize('NFKD', txt).encode('ascii', 'ignore').decode().lower().strip()
 
-# =========================
+
 # BLOCOS DO INPUT
-# =========================
+
 BLOCOS = ["POPULACAO", "ALTITUDE", "TEMPERATURA", "COTAS_PISTA", "ENVERGADURA", "DEMANDA_ANUAL", "NIVEL_SERVICO", "COMPRIMENTO_BASICO", "MODELO_REGRESSAO"]
 
 def eh_bloco(linha):
     return linha in BLOCOS
 
-# =========================
+
 # CARREGAMENTO E CONSOLIDAÇÃO DE DADOS
-# =========================
+
 
 def carregar_bases_locais():
     files = ["ibge_limpo.csv", "PIB2023.csv", "anac.csv"]
@@ -126,9 +126,9 @@ def get_dados_ibge(cidade_nome, df_ibge):
         
     return populacao, pib
 
-# =========================
+
 # CLASSE DE MODELOS ESTATÍSTICOS
-# =========================
+
 
 class FuncoesRegressao:
     @staticmethod
@@ -181,9 +181,8 @@ class FuncoesRegressao:
         a = math.exp(A_ln)
         return lambda x: a * math.exp(B * x), f"Y = {a:.4f} * e^({B:.4f} * X)"
 
-# =========================
 # PREVISÃO DE DEMANDA
-# =========================
+
 
 def selecionar_cidades_similares(pop_alvo, pib_alvo, df_ibge, df_anac):
     cidades_com_aeroporto = df_anac["mun_norm"].unique()
@@ -312,9 +311,9 @@ def calcular_demanda_real(cidade, anos, ano_base, modelo_id):
             
     return resultado
 
-# =========================
+
 # LEITURA DE INPUT
-# =========================
+
 
 def ler_populacao(linha):
     v = linha.split()
@@ -377,9 +376,9 @@ def ler_arquivo_input(caminho):
         i += 1
     return dados
 
-# =========================
+
 # CÁLCULOS FÍSICOS E ÁREAS
-# =========================
+
 
 def fator_hora_pico(d):
     if d < 100000: return 0.169
@@ -482,7 +481,7 @@ def determinar_configuracao_pista(df_ventos, limite_vc=15):
     nome_pista = f"{pista_ida:02d}/{pista_volta:02d}"
     return nome_pista, melhor_cobertura, precisa_secundaria
 
-# --- LEITURA EXCLUSIVA DE ARQUIVO LOCAL (BLINDADA CONTRA O INMET) ---
+# LEITURA EXCLUSIVA DE ARQUIVO LOCAL 
 def buscar_ventos_local(nome_arquivo="historico_ventos.csv"):
     print(f"\n>> Lendo base de dados local: {nome_arquivo}...")
     try:
@@ -499,7 +498,7 @@ def buscar_ventos_local(nome_arquivo="historico_ventos.csv"):
         # 2. Lê o CSV a partir da linha certa
         df_completo = pd.read_csv(nome_arquivo, sep=';', skiprows=linha_cabecalho, encoding='latin-1')
         
-        # 3. Limpeza EXTREMA: remove acentos, espaços, parênteses e deixa só letras
+        # 3. Limpeza: remove acentos, espaços, parênteses e deixa só letras
         def limpar_coluna(nome):
             texto = unicodedata.normalize('NFKD', str(nome)).encode('ascii', 'ignore').decode().lower()
             return re.sub(r'[^a-z]', '', texto)
@@ -527,9 +526,9 @@ def buscar_ventos_local(nome_arquivo="historico_ventos.csv"):
         print(f"\n[!] Erro na leitura do arquivo: {e}")
         print(">> Gerando ventos simulados de segurança para o programa não travar...")
         return pd.DataFrame({'direcao': np.random.randint(0, 360, 1000), 'velocidade': np.random.uniform(2, 25, 1000)})
-# =========================
+
 # MAIN
-# =========================
+
 
 if __name__ == "__main__":
     try:
@@ -559,12 +558,12 @@ if __name__ == "__main__":
         print(f"Comprimento Corrigido (Lf): {formato_br(Lf)} m")
         print(f"Largura da Pista: {formato_br(largura, 0) if largura else 'Fora das especificações'} m")
 
-        # --- ANÁLISE DE VENTOS (ARQUIVO LOCAL) ---
+        #  ANÁLISE DE VENTOS 
         if dados["ENVERGADURA"] < 24: limite_vento = 10.5
         elif dados["ENVERGADURA"] < 36: limite_vento = 13.0
         else: limite_vento = 20.0
 
-        # Chama diretamente a função que lê o arquivo CSV baixado
+      
         df_ventos_local = buscar_ventos_local("historico_ventos.csv")
 
         pista_ideal, cobertura, secundaria = determinar_configuracao_pista(df_ventos_local, limite_vento)
