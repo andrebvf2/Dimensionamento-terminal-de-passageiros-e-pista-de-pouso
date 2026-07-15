@@ -71,33 +71,26 @@ def determinar_configuracao_pista(df_ventos, limite_vc=15):
 def buscar_ventos_local(nome_arquivo="historico_ventos.csv"):
     print(f"\n>> Lendo base de dados local: {nome_arquivo}...")
     try:
-        with open(nome_arquivo, 'r', encoding='latin-1') as f:
-            linhas = f.readlines()
-            
-        linha_cabecalho = 0
-        for i, linha in enumerate(linhas[:20]):
-            if 'data' in linha.lower() or 'vento' in linha.lower():
-                linha_cabecalho = i
-                break
-
-        df_completo = pd.read_csv(nome_arquivo, sep=';', skiprows=linha_cabecalho, encoding='latin-1')
+        # Para pular direto o cabeçalho de texto da NASA e ir para a linha 12.
+        df_completo = pd.read_csv(nome_arquivo, sep=',', skiprows=10, encoding='utf-8')
         
-        def limpar_coluna(nome):
-            texto = unicodedata.normalize('NFKD', str(nome)).encode('ascii', 'ignore').decode().lower()
-            return re.sub(r'[^a-z]', '', texto)
-            
-        df_completo.columns = [limpar_coluna(c) for c in df_completo.columns]
+        # Deixa os nomes das colunas em letras maiúsculas e sem espaços extras
+        df_completo.columns = [c.strip().upper() for c in df_completo.columns]
         
-        col_dir = next((c for c in df_completo.columns if 'dir' in c and 'vento' in c), None)
-        col_vel = next((c for c in df_completo.columns if 'vel' in c and 'vento' in c), None)
+        # Buscando as siglas exatas da NASA: 
+        # WS10M (Wind Speed / Velocidade) e WD10M (Wind Direction / Direção)
+        col_dir = next((c for c in df_completo.columns if 'WD10M' in c or 'DIR' in c), None)
+        col_vel = next((c for c in df_completo.columns if 'WS10M' in c or 'VEL' in c), None)
         
         if not col_dir or not col_vel:
-            raise ValueError("Colunas de vento não encontradas mesmo após a limpeza.")
+            raise ValueError("Colunas WS10M (velocidade) ou WD10M (direção) não encontradas.")
         
+        # Não há necessidade do .str.replace(',', '.'). O pd.to_numeric já resolve direto.
         df_ventos = pd.DataFrame()
-        df_ventos['direcao'] = df_completo[col_dir].astype(str).str.replace(',', '.').apply(pd.to_numeric, errors='coerce')
-        df_ventos['velocidade'] = df_completo[col_vel].astype(str).str.replace(',', '.').apply(pd.to_numeric, errors='coerce')
+        df_ventos['direcao'] = pd.to_numeric(df_completo[col_dir], errors='coerce')
+        df_ventos['velocidade'] = pd.to_numeric(df_completo[col_vel], errors='coerce')
         
+        # Remove linhas vazias ou com erros de leitura, se houver
         df_ventos = df_ventos.dropna()
         
         print(f">> Sucesso! {len(df_ventos)} registros reais de vento prontos para cálculo.")
