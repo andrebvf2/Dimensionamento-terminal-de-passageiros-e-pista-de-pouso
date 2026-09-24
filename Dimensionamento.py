@@ -8,19 +8,17 @@ import re
 import unicodedata
 import numpy as np
 import pandas as pd
+import pista
 
 # IMPORTANDO OS NOSSOS MÓDULOS OTIMIZADOS
 from terminal import calcular_php, dimensionar_terminal
-from pista import calcular_pista, largura_pista, determinar_configuracao_pista, buscar_ventos_local
+from pista import calcular_pista, largura_pista, determinar_configuracao_pista, buscar_ventos_local, gerar_tabela_frequencia
 
 from erros import ErroInput, erro, validar_numero, validar_inteiro, validar_positivo, validar_inteiro_positivo, validar_quantidade_parametros, validar_opcao
 
 # Configuração de log
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-# =========================
-# FUNÇÕES DE FORMATAÇÃO
-# =========================
 # =========================
 # FUNÇÕES DE FORMATAÇÃO E TEXTO
 # =========================
@@ -325,12 +323,13 @@ if __name__ == "__main__":
         print(f"Largura da Pista: {formato_br(largura, 0) if largura else 'Fora das especificações'} m")
 
        
-       # --- ANÁLISE DE VENTOS (TABELA 5 do TCC) ---
+       # --- ANÁLISE DE VENTOS ---
         if L0 < 1200: limite_vento = 5.15
         elif 1200 <= L0 < 1500: limite_vento = 6.70
         else: limite_vento = 10.30
             
         df_ventos_local = buscar_ventos_local("historico_ventos.csv")
+        pista.gerar_tabela_frequencia(df_ventos_local)
         pista_ideal, cobertura, secundaria = determinar_configuracao_pista(df_ventos_local, limite_vento)
         
         #Chamando a função para traduzir a Rosa dos Ventos
